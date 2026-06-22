@@ -488,6 +488,41 @@
 </div>
 
 <script>
+// ====== CONFIG DA API ======
+var API_URL = 'https://script.google.com/macros/s/AKfycbwIC9ZNJQRW8FEUvPX-ApwPLYCeDlnhkD8A8JWisw-mbykMYubhtoP3BWyST_UpPn7C/exec';
+var _jsonpId = 0;
+
+/**
+ * Chama o Apps Script via JSONP (evita CORS).
+ * params: objeto com action + dados. cb: sucesso(res). err: falha(msg).
+ */
+function api(params, cb, err){
+  var nome = 'jsonp_cb_' + (++_jsonpId) + '_' + Date.now();
+  var script = document.createElement('script');
+  var concluido = false;
+
+  var timer = setTimeout(function(){
+    if (!concluido){ limpar(); err && err('A conexão demorou demais. Verifique a publicação do Web App.'); }
+  }, 20000);
+
+  function limpar(){
+    concluido = true;
+    clearTimeout(timer);
+    try { delete window[nome]; } catch(e){ window[nome] = undefined; }
+    if (script.parentNode) script.parentNode.removeChild(script);
+  }
+
+  window[nome] = function(res){ limpar(); cb && cb(res); };
+
+  var qs = Object.keys(params).map(function(k){
+    return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
+  }).join('&');
+
+  script.src = API_URL + '?' + qs + '&callback=' + nome;
+  script.onerror = function(){ if(!concluido){ limpar(); err && err('Erro de rede ao contatar o servidor.'); } };
+  document.body.appendChild(script);
+}
+
 // ====== ESTADO ======
 var DADOS = { metricas:{}, conversas:[], aprendizados:[], base:[], config:[], versaoAtiva:'v1.0' };
 var reprovarRow = null;
@@ -521,18 +556,17 @@ function trocarAba(view){
 // ====== CARREGAR DADOS ======
 function carregar(){
   showLoader(true);
-  google.script.run
-    .withSuccessHandler(function(res){
+  api({ action:'getData' },
+    function(res){
+      showLoader(false);
+      if (!res){ toast('Sem resposta do servidor.', 'error'); return; }
+      if (res.ok === false){ toast('Erro no servidor: ' + (res.erro||'desconhecido'), 'error'); }
       DADOS = res;
       document.getElementById('versaoBadge').textContent = 'Base ativa: ' + (res.versaoAtiva||'v1.0');
       renderTudo();
-      showLoader(false);
-    })
-    .withFailureHandler(function(err){
-      showLoader(false);
-      toast('Erro ao carregar: ' + err.message, 'error');
-    })
-    .getDashboardData();
+    },
+    function(msg){ showLoader(false); toast(msg, 'error'); }
+  );
 }
 
 function renderTudo(){
@@ -675,10 +709,10 @@ function renderAprendizados(){
 function aprovar(row){
   if (!confirm('Aprovar este aprendizado e enviá-lo à Base de Conhecimento?')) return;
   showLoader(true);
-  google.script.run
-    .withSuccessHandler(function(res){ showLoader(false); toast(res.mensagem,'success'); carregar(); })
-    .withFailureHandler(function(err){ showLoader(false); toast('Erro: '+err.message,'error'); })
-    .approveLearning(row);
+  api({ action:'approve', row:row },
+    function(res){ showLoader(false); toast((res&&res.mensagem)||'Aprovado.','success'); carregar(); },
+    function(msg){ showLoader(false); toast('Erro: '+msg,'error'); }
+  );
 }
 function abrirReprovar(row){
   reprovarRow = row;
@@ -689,12 +723,13 @@ function fecharModal(){ document.getElementById('modalReprovar').classList.remov
 function confirmarReprovar(){
   if (reprovarRow===null) return;
   var motivo = document.getElementById('motivoReprovar').value;
-  showLoader(true);
+  var row = reprovarRow;
   fecharModal();
-  google.script.run
-    .withSuccessHandler(function(res){ showLoader(false); toast(res.mensagem,'success'); carregar(); })
-    .withFailureHandler(function(err){ showLoader(false); toast('Erro: '+err.message,'error'); })
-    .rejectLearning(reprovarRow, motivo);
+  showLoader(true);
+  api({ action:'reject', row:row, reason:motivo },
+    function(res){ showLoader(false); toast((res&&res.mensagem)||'Reprovado.','success'); carregar(); },
+    function(msg){ showLoader(false); toast('Erro: '+msg,'error'); }
+  );
 }
 
 // ====== BASE DE CONHECIMENTO ======
@@ -737,14 +772,14 @@ function salvarConhecimento(){
     toast('Preencha ao menos Tema e Resposta.', 'error'); return;
   }
   showLoader(true);
-  google.script.run
-    .withSuccessHandler(function(res){
-      showLoader(false); toast(res.mensagem,'success');
+  api({ action:'addKnowledge', payload: JSON.stringify(payload) },
+    function(res){
+      showLoader(false); toast((res&&res.mensagem)||'Adicionado.','success');
       ['kb_categoria','kb_tema','kb_resposta','kb_versao','kb_obs'].forEach(function(id){ document.getElementById(id).value=''; });
       carregar();
-    })
-    .withFailureHandler(function(err){ showLoader(false); toast('Erro: '+err.message,'error'); })
-    .addKnowledge(payload);
+    },
+    function(msg){ showLoader(false); toast('Erro: '+msg,'error'); }
+  );
 }
 
 // ====== CONFIGURAÇÕES ======
@@ -780,14 +815,14 @@ function salvarConfigNova(){
 }
 function enviarConfig(chave, valor, limpar){
   showLoader(true);
-  google.script.run
-    .withSuccessHandler(function(res){
-      showLoader(false); toast(res.mensagem,'success');
+  api({ action:'saveConfig', key:chave, value:valor },
+    function(res){
+      showLoader(false); toast((res&&res.mensagem)||'Salvo.','success');
       if (limpar){ document.getElementById('cfg_chave').value=''; document.getElementById('cfg_valor').value=''; }
       carregar();
-    })
-    .withFailureHandler(function(err){ showLoader(false); toast('Erro: '+err.message,'error'); })
-    .saveConfig(chave, valor);
+    },
+    function(msg){ showLoader(false); toast('Erro: '+msg,'error'); }
+  );
 }
 
 // ====== INIT ======
